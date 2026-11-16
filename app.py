@@ -1,12 +1,17 @@
-import html
-import json
+import base64
 import datetime as dt
+import html
+import io
+import json
 
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
 st.set_page_config(page_title="Yulfian Store Frozen", page_icon="❄️", layout="wide")
+
+# Ubah ke True untuk mengaktifkan member, poin, dan penjualan hutang.
+FITUR_MEMBER = False
 
 rp = lambda n: "Rp" + f"{int(n or 0):,}".replace(",", ".")
 ROLES = {"owner": "Pemilik", "kasir": "Kasir", "member": "Member"}
@@ -15,6 +20,25 @@ try:
     LIVE = "supabase" in st.secrets  # tanpa secrets -> mode pratinjau
 except Exception:
     LIVE = False
+
+
+# ---------------------------------------------------------------- gambar
+def to_data_url(file):
+    """Perkecil gambar ke maks. 300 px lalu simpan sebagai teks (data URL)."""
+    from PIL import Image
+    im = Image.open(file).convert("RGB")
+    im.thumbnail((300, 300))
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=80)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def foto(p):
+    if p.get("gambar"):
+        st.image(base64.b64decode(p["gambar"].split(",", 1)[1]), use_container_width=True)
+    else:
+        st.markdown(f"<div style='font-size:52px;text-align:center;background:#e3f1f7;border-radius:8px;padding:10px'>{p.get('e', '❄️')}</div>",
+                    unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------- data: pratinjau
@@ -26,22 +50,19 @@ class Demo:
         if "demo" not in ss:
             ss.demo = {
                 "p": [
-                    {"id": 1, "nama": "Nugget ayam 500 g", "harga": 38000, "stok": 24, "h": [35000, 38000]},
-                    {"id": 2, "nama": "Sosis sapi 1 kg", "harga": 62000, "stok": 15, "h": [62000]},
-                    {"id": 3, "nama": "Bakso sapi 500 g", "harga": 35000, "stok": 30, "h": [32000, 35000]},
-                    {"id": 4, "nama": "Kentang goreng 1 kg", "harga": 45000, "stok": 18, "h": [45000]},
-                    {"id": 5, "nama": "Dimsum ayam isi 10", "harga": 28000, "stok": 22, "h": [25000, 28000]},
-                    {"id": 6, "nama": "Udang kupas 500 g", "harga": 70000, "stok": 9, "h": [75000, 70000]},
+                    {"id": 1, "e": "🍗", "nama": "Nugget ayam 500 g", "harga": 38000, "stok": 24, "sold": 31, "gambar": None, "h": [35000, 38000]},
+                    {"id": 2, "e": "🌭", "nama": "Sosis sapi 1 kg", "harga": 62000, "stok": 15, "sold": 18, "gambar": None, "h": [62000]},
+                    {"id": 3, "e": "🍢", "nama": "Bakso sapi 500 g", "harga": 35000, "stok": 30, "sold": 44, "gambar": None, "h": [32000, 35000]},
+                    {"id": 4, "e": "🍟", "nama": "Kentang goreng 1 kg", "harga": 45000, "stok": 18, "sold": 22, "gambar": None, "h": [45000]},
+                    {"id": 5, "e": "🥟", "nama": "Dimsum ayam isi 10", "harga": 28000, "stok": 22, "sold": 39, "gambar": None, "h": [25000, 28000]},
+                    {"id": 6, "e": "🦐", "nama": "Udang kupas 500 g", "harga": 70000, "stok": 6, "sold": 12, "gambar": None, "h": [75000, 70000]},
                 ],
                 "m": [
                     {"id": 1, "nama": "Bu Sari", "hp": "0812-3456-7890", "poin": 42, "hutang": 85000},
                     {"id": 2, "nama": "Pak Andi", "hp": "0857-1122-3344", "poin": 17, "hutang": 0},
-                    {"id": 3, "nama": "Warung Mbak Rina", "hp": "0821-9988-7766", "poin": 120, "hutang": 240000},
                 ],
-                "s": [
-                    {"t": "08:12", "m": "Bu Sari", "total": 112000, "metode": "tunai"},
-                    {"t": "10:05", "m": "Warung Mbak Rina", "total": 240000, "metode": "hutang"},
-                ],
+                "s": [{"t": "08:12", "m": "Umum", "total": 112000, "metode": "tunai"},
+                      {"t": "09:40", "m": "Umum", "total": 38000, "metode": "tunai"}],
                 "n": 100,
             }
         self.d = ss.demo
@@ -53,24 +74,29 @@ class Demo:
     def products(self):
         return self.d["p"]
 
-    def add_product(self, nama, harga, stok):
-        self.d["p"].append({"id": self._id(), "nama": nama, "harga": harga, "stok": stok, "h": [harga]})
+    def add_product(self, nama, harga, stok, gambar=None):
+        self.d["p"].append({"id": self._id(), "e": "❄️", "nama": nama, "harga": harga, "stok": stok,
+                            "sold": 0, "gambar": gambar, "h": [harga]})
 
-    def set_price(self, pid, harga):
+    def update_product(self, pid, nama, harga, stok, gambar=None):
         p = next(x for x in self.d["p"] if x["id"] == pid)
-        p["harga"] = harga
-        p["h"].append(harga)
-
-    def update_product(self, pid, nama, harga):
-        p = next(x for x in self.d["p"] if x["id"] == pid)
-        p["nama"] = nama
+        p["nama"], p["stok"] = nama, stok
+        if gambar:
+            p["gambar"] = gambar
         if harga != p["harga"]:
-            self.set_price(pid, harga)
+            p["harga"] = harga
+            p["h"].append(harga)
+
+    def deactivate(self, pid):
+        self.d["p"] = [x for x in self.d["p"] if x["id"] != pid]
 
     def price_history(self, pid):
         h = next(x for x in self.d["p"] if x["id"] == pid)["h"]
         return [{"Perubahan": "Harga awal" if i == 0 else f"Ke-{i}",
                  "Harga lama": rp(h[i - 1]) if i else "-", "Harga baru": rp(v)} for i, v in enumerate(h)][::-1]
+
+    def top_products(self):
+        return sorted(([p["nama"], p["sold"]] for p in self.d["p"]), key=lambda x: -x[1])[:5]
 
     def members(self):
         return self.d["m"]
@@ -92,6 +118,7 @@ class Demo:
                 m["hutang"] += total
         for i in items:
             byid[i["product_id"]]["stok"] -= i["qty"]
+            byid[i["product_id"]]["sold"] += i["qty"]
         self.d["s"].insert(0, {"t": dt.datetime.now().strftime("%H:%M"), "m": m["nama"] if m else "Umum",
                                "total": total, "metode": metode})
         return {"total": total, "poin": poin}
@@ -104,10 +131,8 @@ class Demo:
         return [{"waktu": s["t"], "member": s["m"], "total": s["total"], "metode": s["metode"]} for s in self.d["s"]]
 
     def week(self):
-        hari = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab"]
-        data = [820000, 640000, 910000, 760000, 1020000, 880000]
-        hari.append("Hari ini")
-        data.append(sum(s["total"] for s in self.d["s"]))
+        hari = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Hari ini"]
+        data = [820000, 640000, 910000, 760000, 1020000, 880000, sum(s["total"] for s in self.d["s"])]
         return pd.DataFrame({"Omzet": data}, index=hari)
 
     def my_sales(self):
@@ -125,20 +150,30 @@ class Sb:
     def products(self):
         return self.c.table("products").select("*").eq("aktif", True).order("nama").execute().data
 
-    def add_product(self, nama, harga, stok):
-        self.c.table("products").insert({"nama": nama, "harga": harga, "stok": stok}).execute()
+    def add_product(self, nama, harga, stok, gambar=None):
+        self.c.table("products").insert({"nama": nama, "harga": harga, "stok": stok, "gambar": gambar}).execute()
 
-    def set_price(self, pid, harga):
-        self.c.table("products").update({"harga": harga}).eq("id", pid).execute()
+    def update_product(self, pid, nama, harga, stok, gambar=None):
+        data = {"nama": nama, "harga": harga, "stok": stok}
+        if gambar:
+            data["gambar"] = gambar
+        self.c.table("products").update(data).eq("id", pid).execute()
 
-    def update_product(self, pid, nama, harga):
-        self.c.table("products").update({"nama": nama, "harga": harga}).eq("id", pid).execute()
+    def deactivate(self, pid):
+        self.c.table("products").update({"aktif": False}).eq("id", pid).execute()
 
     def price_history(self, pid):
         r = self.c.table("price_history").select("*").eq("product_id", pid).order("dibuat", desc=True).execute().data
         return [{"Waktu": x["dibuat"][:16].replace("T", " "),
                  "Harga lama": rp(x["harga_lama"]) if x["harga_lama"] is not None else "-",
                  "Harga baru": rp(x["harga_baru"])} for x in r]
+
+    def top_products(self):
+        r = self.c.table("sale_items").select("nama,qty").limit(2000).execute().data
+        if not r:
+            return []
+        df = pd.DataFrame(r).groupby("nama")["qty"].sum().sort_values(ascending=False).head(5)
+        return [[n, int(q)] for n, q in df.items()]
 
     def members(self):
         return self.c.table("members").select("*").order("nama").execute().data
@@ -151,8 +186,8 @@ class Sb:
 
     def checkout(self, mid, items, bayar, metode):
         r = self.c.rpc("checkout", {"p_member": mid, "p_items": items, "p_bayar": bayar, "p_metode": metode}).execute().data
-        total = sum(next(p["harga"] for p in self.products() if p["id"] == i["product_id"]) * i["qty"] for i in items)
-        return {"total": total, "poin": r["poin"]}
+        harga = {p["id"]: p["harga"] for p in self.products()}
+        return {"total": sum(harga[i["product_id"]] * i["qty"] for i in items), "poin": r["poin"]}
 
     def pay_debt(self, mid, jumlah):
         self.c.rpc("bayar_hutang", {"p_member": mid, "p_jumlah": jumlah}).execute()
@@ -229,7 +264,7 @@ def new_client():
 
 def login():
     st.title("❄️ Yulfian Store Frozen")
-    st.caption("Masuk untuk memakai kasir atau melihat poin Anda.")
+    st.caption("Masuk untuk memakai kasir. Akun pertama yang terdaftar otomatis menjadi pemilik.")
     email = st.text_input("Email")
     sandi = st.text_input("Kata sandi (min. 6 karakter)", type="password")
     a, b = st.columns(2)
@@ -242,7 +277,7 @@ def login():
             st.rerun()
         except Exception:
             st.error("Email atau kata sandi salah.")
-    if b.button("Daftar sebagai member"):
+    if b.button("Daftar akun baru"):
         try:
             new_client().auth.sign_up({"email": email, "password": sandi})
             st.success("Pendaftaran berhasil. Silakan masuk.")
@@ -262,7 +297,7 @@ if LIVE:
     D = Sb()
 else:
     st.sidebar.info("Mode pratinjau: data contoh, tidak tersimpan permanen.")
-    peran = st.sidebar.selectbox("Lihat sebagai", list(ROLES), format_func=ROLES.get)
+    peran = st.sidebar.selectbox("Lihat sebagai", ["owner", "kasir"], format_func=ROLES.get)
     me = {"role": peran, "id": "demo", "nama": "Bu Sari"}
     D = Demo()
 
@@ -280,27 +315,32 @@ def page_kasir():
         q = st.text_input("Cari produk")
         cols = st.columns(3)
         for i, p in enumerate([p for p in produk if q.lower() in p["nama"].lower()]):
-            if cols[i % 3].button(f"{p['nama']}\n{rp(p['harga'])} · stok {p['stok']}", key=f"p{p['id']}", use_container_width=True):
-                ss.cart[p["id"]] = ss.cart.get(p["id"], 0) + 1
-                st.rerun()
+            with cols[i % 3].container(border=True):
+                foto(p)
+                st.markdown(f"**{p['nama']}**  \n{rp(p['harga'])} · stok {p['stok']}")
+                if st.button("Tambah", key=f"p{p['id']}", use_container_width=True, disabled=p["stok"] <= ss.cart.get(p["id"], 0)):
+                    ss.cart[p["id"]] = ss.cart.get(p["id"], 0) + 1
+                    st.rerun()
     with kanan:
         st.subheader("Keranjang")
         if not ss.cart:
-            st.caption("Klik produk untuk menambah ke keranjang.")
+            st.caption("Klik Tambah pada produk untuk mengisi keranjang.")
         for pid in list(ss.cart):
             p = byid[pid]
-            ss.cart[pid] = st.number_input(f"{p['nama']} ({rp(p['harga'])})", 0, 999, ss.cart[pid], key=f"q{pid}")
+            ss.cart[pid] = st.number_input(f"{p['nama']} ({rp(p['harga'])})", 0, int(p["stok"]), ss.cart[pid], key=f"q{pid}")
             if ss.cart[pid] == 0:
                 del ss.cart[pid]
                 st.rerun()
         total = sum(byid[i]["harga"] * n for i, n in ss.cart.items())
         st.metric("Total", rp(total))
-        opsi = {None: "Tanpa member", **{m["id"]: f"{m['nama']} · {m['poin']} poin" for m in D.members()}}
-        mid = st.selectbox("Member", list(opsi), format_func=opsi.get)
-        metode = st.radio("Pembayaran", ["tunai", "hutang"], horizontal=True)
+        mid, metode, opsi = None, "tunai", {None: "Tanpa member"}
+        if FITUR_MEMBER:
+            opsi.update({m["id"]: f"{m['nama']} · {m['poin']} poin" for m in D.members()})
+            mid = st.selectbox("Member", list(opsi), format_func=opsi.get)
+            metode = st.radio("Pembayaran", ["tunai", "hutang"], horizontal=True)
+            if mid:
+                st.caption(f"Poin didapat transaksi ini: {total // 10000}")
         bayar = st.number_input("Uang diterima", 0, value=int(total), step=1000) if metode == "tunai" else 0
-        if mid:
-            st.caption(f"Poin didapat transaksi ini: {total // 10000}")
         if st.button("Bayar dan cetak struk", type="primary", disabled=not ss.cart):
             if metode == "tunai" and bayar < total:
                 st.error("Uang diterima kurang dari total.")
@@ -329,34 +369,46 @@ def page_kasir():
 def page_produk():
     own = me["role"] == "owner"
     produk = D.products()
-    st.dataframe(pd.DataFrame([{"Produk": p["nama"], "Harga": rp(p["harga"]), "Stok": p["stok"]} for p in produk]),
-                 use_container_width=True, hide_index=True)
     nama = {p["id"]: p["nama"] for p in produk}
+
+    cols = st.columns(4)
+    for i, p in enumerate(produk):
+        with cols[i % 4].container(border=True):
+            foto(p)
+            st.markdown(f"**{p['nama']}**  \n{rp(p['harga'])} · stok {p['stok']}")
+
     if own:
-        with st.expander("Tambah produk"):
-            a, b, c = st.columns(3)
-            n = a.text_input("Nama produk")
-            h = b.number_input("Harga", 0, step=500)
-            s = c.number_input("Stok", 0)
-            if st.button("Simpan produk") and n and h:
-                D.add_product(n, h, s)
-                st.rerun()
-        with st.expander("Ubah nama dan harga produk"):
-            pid = st.selectbox("Produk", list(nama), format_func=nama.get, key="ubah")
-            cur = next(p for p in produk if p["id"] == pid)
-            nama_baru = st.text_input("Nama produk", cur["nama"], key=f"enm{pid}")
-            harga_baru = st.number_input("Harga", 0, value=int(cur["harga"]), step=500, key=f"eh{pid}")
-            if st.button("Simpan perubahan"):
-                if not nama_baru.strip():
-                    st.error("Nama produk tidak boleh kosong.")
-                else:
-                    try:
-                        D.update_product(pid, nama_baru.strip(), harga_baru)
-                    except Exception as e:
-                        st.error(str(e))
+        st.subheader("Kelola produk")
+        pilih = st.selectbox("Pilih produk", ["__baru__"] + list(nama),
+                             format_func=lambda x: "➕ Produk baru" if x == "__baru__" else nama[x], key="kelola")
+        cur = {"nama": "", "harga": 0, "stok": 0} if pilih == "__baru__" else next(p for p in produk if p["id"] == pilih)
+        with st.form(f"form_{pilih}"):
+            n = st.text_input("Nama produk", cur["nama"])
+            h = st.number_input("Harga", 0, value=int(cur["harga"]), step=500)
+            s = st.number_input("Stok", 0, value=int(cur["stok"]))
+            f = st.file_uploader("Gambar produk (kosongkan jika tidak diganti)", type=["png", "jpg", "jpeg", "webp"])
+            kirim = st.form_submit_button("Simpan", type="primary")
+        if kirim:
+            if not n.strip() or h <= 0:
+                st.error("Isi nama dan harga produk.")
+            else:
+                try:
+                    g = to_data_url(f) if f else None
+                    if pilih == "__baru__":
+                        D.add_product(n.strip(), h, s, g)
                     else:
-                        st.success("Perubahan disimpan. Perubahan harga tercatat di riwayat.")
-                        st.rerun()
+                        D.update_product(pilih, n.strip(), h, s, g)
+                except Exception as e:
+                    st.error(str(e))
+                else:
+                    st.success("Produk disimpan. Perubahan harga tercatat di riwayat.")
+                    st.rerun()
+        if pilih != "__baru__":
+            ya = st.checkbox("Saya yakin ingin menghapus produk ini dari daftar", key=f"y{pilih}")
+            if st.button("Hapus produk", disabled=not ya):
+                D.deactivate(pilih)
+                st.rerun()
+
     st.subheader("Riwayat perubahan harga")
     if nama:
         pid = st.selectbox("Produk", list(nama), format_func=nama.get, key="riw")
@@ -390,14 +442,28 @@ def page_hutang():
 
 def page_dash():
     sales = D.sales_today()
-    ms = D.members()
+    total = sum(s["total"] for s in sales)
+    low = [p for p in D.products() if p["stok"] <= 10]
     a, b, c, d = st.columns(4)
-    a.metric("Omzet hari ini", rp(sum(s["total"] for s in sales)))
+    a.metric("Omzet hari ini", rp(total))
     b.metric("Transaksi hari ini", len(sales))
-    c.metric("Hutang beredar", rp(sum(m["hutang"] for m in ms)))
-    d.metric("Jumlah member", len(ms))
+    c.metric("Rata-rata per transaksi", rp(total / len(sales)) if sales else rp(0))
+    d.metric("Stok menipis", f"{len(low)} produk")
+    if FITUR_MEMBER:
+        ms = D.members()
+        st.metric("Hutang beredar", rp(sum(m["hutang"] for m in ms)))
     st.subheader("Omzet 7 hari terakhir")
     st.bar_chart(D.week())
+    k, l = st.columns(2)
+    with k:
+        st.subheader("Produk terlaris")
+        st.dataframe(pd.DataFrame(D.top_products(), columns=["Produk", "Terjual"]), use_container_width=True, hide_index=True)
+    with l:
+        st.subheader("Stok menipis")
+        if low:
+            st.dataframe(pd.DataFrame([{"Produk": p["nama"], "Sisa": p["stok"]} for p in low]), use_container_width=True, hide_index=True)
+        else:
+            st.caption("Semua stok aman.")
     st.subheader("Transaksi hari ini")
     st.dataframe(pd.DataFrame(sales), use_container_width=True, hide_index=True)
 
@@ -413,10 +479,19 @@ def page_akun():
 
 
 if me["role"] == "member":
-    page_akun()
+    if FITUR_MEMBER:
+        page_akun()
+    else:
+        st.info("Akun ini belum punya akses ke kasir. Minta pemilik toko mengubah peran akun Anda menjadi kasir.")
 else:
-    nama_tab = ["Kasir", "Produk", "Member", "Hutang"] + (["Dashboard"] if me["role"] == "owner" else [])
-    fn = [page_kasir, page_produk, page_member, page_hutang] + ([page_dash] if me["role"] == "owner" else [])
+    nama_tab = ["Kasir", "Produk"]
+    fn = [page_kasir, page_produk]
+    if FITUR_MEMBER:
+        nama_tab += ["Member", "Hutang"]
+        fn += [page_member, page_hutang]
+    if me["role"] == "owner":
+        nama_tab.append("Dashboard")
+        fn.append(page_dash)
     for t, f in zip(st.tabs(nama_tab), fn):
         with t:
             f()
