@@ -61,6 +61,12 @@ class Demo:
         p["harga"] = harga
         p["h"].append(harga)
 
+    def update_product(self, pid, nama, harga):
+        p = next(x for x in self.d["p"] if x["id"] == pid)
+        p["nama"] = nama
+        if harga != p["harga"]:
+            self.set_price(pid, harga)
+
     def price_history(self, pid):
         h = next(x for x in self.d["p"] if x["id"] == pid)["h"]
         return [{"Perubahan": "Harga awal" if i == 0 else f"Ke-{i}",
@@ -124,6 +130,9 @@ class Sb:
 
     def set_price(self, pid, harga):
         self.c.table("products").update({"harga": harga}).eq("id", pid).execute()
+
+    def update_product(self, pid, nama, harga):
+        self.c.table("products").update({"nama": nama, "harga": harga}).eq("id", pid).execute()
 
     def price_history(self, pid):
         r = self.c.table("price_history").select("*").eq("product_id", pid).order("dibuat", desc=True).execute().data
@@ -332,13 +341,22 @@ def page_produk():
             if st.button("Simpan produk") and n and h:
                 D.add_product(n, h, s)
                 st.rerun()
-        with st.expander("Ubah harga"):
+        with st.expander("Ubah nama dan harga produk"):
             pid = st.selectbox("Produk", list(nama), format_func=nama.get, key="ubah")
-            baru = st.number_input("Harga baru", 0, step=500)
-            if st.button("Ubah harga") and baru:
-                D.set_price(pid, baru)
-                st.success("Harga diubah dan tercatat di riwayat.")
-                st.rerun()
+            cur = next(p for p in produk if p["id"] == pid)
+            nama_baru = st.text_input("Nama produk", cur["nama"], key=f"enm{pid}")
+            harga_baru = st.number_input("Harga", 0, value=int(cur["harga"]), step=500, key=f"eh{pid}")
+            if st.button("Simpan perubahan"):
+                if not nama_baru.strip():
+                    st.error("Nama produk tidak boleh kosong.")
+                else:
+                    try:
+                        D.update_product(pid, nama_baru.strip(), harga_baru)
+                    except Exception as e:
+                        st.error(str(e))
+                    else:
+                        st.success("Perubahan disimpan. Perubahan harga tercatat di riwayat.")
+                        st.rerun()
     st.subheader("Riwayat perubahan harga")
     if nama:
         pid = st.selectbox("Produk", list(nama), format_func=nama.get, key="riw")
